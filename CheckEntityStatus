@@ -1,0 +1,53 @@
+USE [MESDB];
+GO
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+CREATE PROCEDURE [dbo].[sp_U_zzz_Entity_Status_WithPing]
+WITH EXEC AS CALLER
+AS
+--
+---           zzz_entity tablosundaki ipleri alıp ping atuyoruz. Sonrasında status kolonunu dolduruyoruz.
+--
+DECLARE @pc_ip nvarchar(max)
+DECLARE @physical_pc_ip nvarchar(MAX)
+DECLARE @status int
+DECLARE @cmd varchar(100)
+DECLARE crs_ent CURSOR FOR
+SELECT entity_ip FROM zzz_entity
+    WHERE entity_ip!='yok' and entity_ip is not null and entity_ip!=''
+
+OPEN crs_ent
+
+FETCH NEXT FROM crs_ent INTO @pc_ip
+
+WHILE @@FETCH_STATUS =0
+	BEGIN
+  set @physical_pc_ip=' '
+   SET @cmd = 'ping -a -n 1 ' + @pc_ip
+  IF(OBJECT_ID('tempdb..#Output') IS NOT NULL)
+  BEGIN
+      DROP TABLE #Output
+  END
+    Create Table #Output (Output varchar(150) default(''))
+    INSERT INTO #Output 
+    EXEC xp_cmdshell @cmd 
+    Begin try 
+    select @status= case when count(*)>0 then 0 else 1 end  from #Output where [Output] like '%Unreachable%' or [Output] like '%could not find host%'
+     Select top 1 @physical_pc_ip=SUBSTRING([Output],CHARINDEX('[',[Output])+1, CHARINDEX(']',[Output])-CHARINDEX('[',[Output])-1 ) from #Output where Output like 'Pinging%'
+    End Try 
+    Begin catch 
+    Select 'Bu HostName:' + @pc_ip +' ''n IP ADRESI BULUNAMADI'
+    End catch 
+    
+    update zzz_entity set pc_status=@status,physical_entity_ip=@physical_pc_ip where entity_ip=@pc_ip
+
+		FETCH NEXT FROM crs_ent INTO @pc_ip
+ 
+	END
+
+CLOSE crs_ent
+
+DEALLOCATE crs_ent
+GO
